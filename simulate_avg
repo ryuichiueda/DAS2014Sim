@@ -1,0 +1,63 @@
+#!/bin/bash
+
+tmp=./tmp$$/$$
+rm -f ./tmp$$/*
+mkdir -p ./tmp$$/
+
+INIT="1000.0 0.0 -90.0"
+POS=$INIT
+n=0 
+
+SAMPLE_NUM=1000
+
+#パーティクルの設定
+./bin/uniform_rand			|
+head -n $((SAMPLE_NUM * 3))		|
+yarr -3					|
+awk -v n=${SAMPLE_NUM} \
+	'{print $1*4000-2000,$2*4000-2000,
+		$3*360.0 - 180.0,1.0/n}' > $tmp-particles.0000
+
+seq 1 500 |
+while read step ; do
+	m=$n
+	n=$((n+1))
+	mm=$(maezero 1.4 <<< $m)
+	nn=$(maezero 1.4 <<< $n)
+	if [ $(( n % 5 )) -eq 1 ] ;then
+		SENS=$(./bin/sensing <<< $POS)
+		cat $tmp-particles.$mm		|
+		./bin/pf_sensing ${SENS}	|
+		tee $tmp-particles-a.$mm	|
+		./bin/pf_sensorreset "1.0e-5" $SENS 	> $tmp-particles-obs.$mm
+		echo $mm sensing ${SENS}
+
+		cp $tmp-particles-obs.$mm $tmp-particles.$mm
+	fi
+
+	A=$(cat $tmp-particles.$mm | ./bin/avg_controller)
+	POS=$(./bin/robot_motion $A <<< $POS )
+
+	cat $tmp-particles.$mm			|
+	./bin/pf_goal				|
+	#./bin/pf_weight				|
+	./bin/pf_motion $A	> $tmp-particles.$nn
+
+	echo $nn $A $POS
+
+	./bin/in_goal <<< $POS > $tmp-goal
+
+	{
+		./bin/print_world <<< $POS
+		awk '{print "PARTICLE",$0}' $tmp-particles.$nn
+	}			|
+	tee $tmp-allinfo.$nn	|
+	./scr/draw		> $tmp-allinfo.$nn.png
+
+	[ "$(cat $tmp-goal)" = "OK" ] && exit 0
+done
+
+wait
+convert -loop 1 -delay 10 $tmp-*.png $tmp-animation.gif
+
+mv ./tmp$$/ ./result_avg/tmp.$(date +%Y%m%d%H%M%S)
